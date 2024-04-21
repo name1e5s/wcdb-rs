@@ -1,5 +1,6 @@
 #![allow(warnings)]
-mod WCDBBridging;
+pub mod WCDBBridging;
+pub mod bridged;
 
 pub use WCDBBridging::*;
 

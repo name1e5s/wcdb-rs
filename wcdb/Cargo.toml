@@ -8,3 +8,6 @@ cmake = "0.1"
 
 [dependencies]
 libwcdb-sys = { path = "../libwcdb-sys" }
+
+thiserror = "1"
+num_enum = "0.7"
