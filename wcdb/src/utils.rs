@@ -17,6 +17,12 @@ macro_rules! cpp_bridged {
                 }
             }
         }
+
+        impl From<$raw> for $name {
+            fn from(raw: $raw) -> Self {
+                Self(raw)
+            }
+        }
     };
 }
 
