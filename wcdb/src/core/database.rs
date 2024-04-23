@@ -1,10 +1,12 @@
+use either::Either;
+
 use crate::{
     error::{self, Result, WCDBError},
     utils::{cpp_bridged, path_to_cstring},
     Tag,
 };
-use std::path::Path;
 use std::ptr;
+use std::{ffi::CString, path::Path};
 
 use super::handle::Handle;
 
@@ -88,33 +90,25 @@ impl Database {
     ///     database.close()
     ///     //do something on this closed database
     ///     database.unblockade()
-    pub fn close_with_callback<F>(&self, on_closed: F) -> Result<()>
+    /// Note that panic in callback will lead to crash.
+    pub fn close_with_callback<F>(&self, on_closed: F)
     where
-        F: FnOnce() -> Result<()> + Send + 'static,
+        F: FnOnce() + Send + 'static,
     {
-        self.close_with_callback_inner(Box::new(on_closed))
-    }
-
-    fn close_with_callback_inner(
-        &self,
-        inner: Box<dyn FnOnce() -> Result<()> + Send + 'static>,
-    ) -> Result<()> {
-        let mut result = Ok(());
-        let on_closed: Box<dyn FnOnce()> = Box::new(|| {
-            result = inner();
-        });
-        unsafe extern "C" fn on_closed_callback(ptr: *mut std::ffi::c_void) {
-            let inner = Box::from_raw(ptr as *mut Box<dyn FnOnce() + Send + 'static>);
+        unsafe extern "C" fn on_closed_callback<F>(ptr: *mut std::ffi::c_void)
+        where
+            F: FnOnce() + Send + 'static,
+        {
+            let inner = Box::from_raw(ptr as *mut F);
             inner();
         }
         unsafe {
             libwcdb_sys::WCDBDatabaseClose(
                 self.0,
-                Box::into_raw(on_closed) as *mut std::ffi::c_void,
-                Some(on_closed_callback),
+                Box::into_raw(Box::new(on_closed)) as _,
+                Some(on_closed_callback::<F>),
             );
         }
-        result
     }
 
     /// Close the database.
@@ -164,7 +158,7 @@ impl Database {
         let handle = unsafe { libwcdb_sys::WCDBDatabaseGetHandle(self.0, write_hint) };
         let handle_valid = unsafe { libwcdb_sys::WCDBHandleCheckValid(handle) };
         if handle_valid {
-            Ok(handle.into())
+            Ok(Handle::owned(handle))
         } else {
             Err(self.error())
         }
@@ -179,5 +173,192 @@ impl Database {
         let err = unsafe { libwcdb_sys::WCDBDatabaseGetError(self.0) };
         let wcdb_error = WCDBError::from(err);
         wcdb_error.into()
+    }
+}
+
+// Config
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum CipherVersion {
+    DefaultVersion = 0,
+    Version1 = 1,
+    Version2 = 2,
+    Version3 = 3,
+    Version4 = 4,
+}
+
+pub struct CipherConfig<'a> {
+    pub key: Option<&'a [u8]>,
+    pub page_size: i32,
+    pub cipher_version: CipherVersion,
+}
+
+impl Default for CipherConfig<'_> {
+    fn default() -> Self {
+        Self {
+            key: None,
+            page_size: 4096,
+            cipher_version: CipherVersion::DefaultVersion,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct CipherConfigBuilder<'a>(CipherConfig<'a>);
+
+impl<'a> CipherConfigBuilder<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn key(mut self, key: &'a [u8]) -> Self {
+        self.0.key = Some(key);
+        self
+    }
+
+    pub fn page_size(mut self, page_size: i32) -> Self {
+        self.0.page_size = page_size;
+        self
+    }
+
+    pub fn cipher_version(mut self, cipher_version: CipherVersion) -> Self {
+        self.0.cipher_version = cipher_version;
+        self
+    }
+
+    pub fn build(self) -> CipherConfig<'a> {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum ConfigPriority {
+    Highest = -2147483648, // Only For cipher config
+    High = -100,
+    Default = 0,
+    Low = 100,
+}
+
+impl Database {
+    pub fn set_cipher(&self, config: CipherConfig) {
+        if let Some(key) = config.key {
+            let key_size = key.len();
+            let key = key.as_ptr();
+            let page_size = config.page_size;
+            let cipher_version = config.cipher_version as i32;
+            unsafe {
+                libwcdb_sys::WCDBDatabaseConfigCipher(
+                    self.0,
+                    key,
+                    key_size as i32,
+                    page_size,
+                    cipher_version,
+                )
+            };
+        } else {
+            unsafe { libwcdb_sys::WCDBDatabaseConfigCipher(self.0, ptr::null(), 0, 0, 0) };
+        }
+    }
+
+    pub fn set_default_cipher(version: CipherVersion) {
+        let cipher_version = version as i32;
+        unsafe { libwcdb_sys::WCDBCoreSetDefaultCipherConfig(cipher_version) };
+    }
+
+    /// Set config for this database.
+    ///
+    /// Since WCDB is a multi-handle database, an executing handle will not apply this config immediately.  
+    /// Instead, all handles will run this config before its next operation.
+    ///
+    /// If you want to add cipher config, please use `ConfigPriority.highest`.
+    ///
+    ///     database.setConfig(named: "demo", withInvocation: { (handle: Handle) throws in
+    ///         try handle.exec(StatementPragma().pragma(.secureDelete).to(true))
+    ///     }, withUninvocation: { (handle: Handle) throws in
+    ///         try handle.exec(StatementPragma().pragma(.secureDelete).to(false))
+    ///     }, withPriority: .high)
+    ///
+    /// - Parameters:
+    ///   - name: The Identifier for this config
+    ///   - callback: config
+    ///   - invocation: The callback will be called when the handle is opened
+    ///  - uninvocation: The callback will be called when the handle is closed
+    ///   - order: The smaller number is called first
+    /// Note that panic in callback will lead to crash.
+    pub fn set_config<F1, F2>(
+        &self,
+        name: &str,
+        invocation: F1,
+        uninvocation: F2,
+        priority: ConfigPriority,
+    ) -> Result<()>
+    where
+        F1: Fn(Handle) -> bool + 'static,
+        F2: Fn(Handle) -> bool + 'static,
+    {
+        unsafe extern "C" fn callback_left<F1, F2>(
+            context: *mut std::ffi::c_void,
+            handle: libwcdb_sys::CPPHandle,
+        ) -> bool
+        where
+            F1: Fn(Handle) -> bool,
+            F2: Fn(Handle) -> bool,
+        {
+            let context = Box::from_raw(context as *mut Either<F1, F2>);
+            let ret = if let Some(left) = context.as_ref().as_ref().left() {
+                let handle = Handle::owned(handle);
+                left(handle)
+            } else {
+                true
+            };
+            Box::into_raw(context); // just forget it
+            ret
+        }
+
+        unsafe extern "C" fn callback_right<F1, F2>(
+            context: *mut std::ffi::c_void,
+            handle: libwcdb_sys::CPPHandle,
+        ) -> bool
+        where
+            F1: Fn(Handle) -> bool,
+            F2: Fn(Handle) -> bool,
+        {
+            let context = Box::from_raw(context as *mut Either<F1, F2>);
+            let ret = if let Some(right) = context.as_ref().as_ref().right() {
+                let handle = Handle::owned(handle);
+                right(handle)
+            } else {
+                true
+            };
+            Box::into_raw(context); // just forget it
+            ret
+        }
+
+        unsafe extern "C" fn callback_destructor<F1, F2>(context: *mut std::ffi::c_void)
+        where
+            F1: FnOnce(Handle) -> bool,
+            F2: FnOnce(Handle) -> bool,
+        {
+            let _ = Box::from_raw(context as *mut Either<F1, F2>);
+        }
+
+        let name = CString::new(name)?;
+        let invocation = Box::into_raw(Box::new(Either::<F1, F2>::Left(invocation)));
+        let uninvocation = Box::into_raw(Box::new(Either::<F1, F2>::Right(uninvocation)));
+        unsafe {
+            libwcdb_sys::WCDBDatabaseConfig(
+                self.0,
+                name.as_ptr(),
+                Some(callback_left::<F1, F2>),
+                invocation as _,
+                Some(callback_right::<F1, F2>),
+                uninvocation as _,
+                priority as i32,
+                Some(callback_destructor::<F1, F2>), // hard to destruct both invocation and uninvocation, let it leak
+            );
+        }
+        Ok(())
     }
 }
