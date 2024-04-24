@@ -12,7 +12,7 @@ pub enum Error {
     #[error("Failed to get a valid C string, {0}")]
     NulError(#[from] NulError),
     #[error("WCDB internal error: {0}")]
-    WCDBError(#[from] WCDBError),
+    WCDBError(#[from] Box<WCDBError>),
 }
 
 #[derive(Debug, Eq, PartialEq, TryFromPrimitive)]

@@ -1,15 +1,26 @@
+use super::database::Database;
+
 pub struct Handle {
     raw: libwcdb_sys::CPPHandle,
+    database: Database,
     owned: bool,
 }
 
 impl Handle {
-    pub fn owned(raw: libwcdb_sys::CPPHandle) -> Self {
-        Self { raw, owned: true }
+    pub fn owned(raw: libwcdb_sys::CPPHandle, database: Database) -> Self {
+        Self {
+            raw,
+            database,
+            owned: true,
+        }
     }
 
-    pub fn reference(raw: libwcdb_sys::CPPHandle) -> Self {
-        Self { raw, owned: false }
+    pub fn reference(raw: libwcdb_sys::CPPHandle, database: Database) -> Self {
+        Self {
+            raw,
+            database,
+            owned: false,
+        }
     }
 
     pub fn raw(&self) -> libwcdb_sys::CPPHandle {

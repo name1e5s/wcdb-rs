@@ -5,12 +5,18 @@ use crate::{
     utils::{cpp_bridged, path_to_cstring},
     Tag,
 };
-use std::ptr;
 use std::{ffi::CString, path::Path};
+use std::{ptr, sync::Arc};
 
 use super::handle::Handle;
 
-cpp_bridged!(pub struct Database(libwcdb_sys::CPPDatabase));
+cpp_bridged!(struct InnerDatabase(libwcdb_sys::CPPDatabase));
+
+unsafe impl Send for InnerDatabase {}
+unsafe impl Sync for InnerDatabase {}
+
+#[derive(Clone)]
+pub struct Database(Arc<InnerDatabase>);
 
 impl Database {
     /// Init a database from path.  
@@ -20,13 +26,13 @@ impl Database {
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Database> {
         let path = path_to_cstring(path.as_ref())?;
         let db = unsafe { libwcdb_sys::WCDBCoreCreateDatabase(path.as_ptr()) };
-        Ok(Database(db))
+        Ok(Database(Arc::new(InnerDatabase(db))))
     }
 
     /// The tag of the database. Default to nil.
     /// Note that core objects with same path share this tag, even they are not the same object.
     pub fn get_tag(&self) -> Option<Tag> {
-        let tag = unsafe { libwcdb_sys::WCDBDatabaseGetTag(self.0) };
+        let tag = unsafe { libwcdb_sys::WCDBDatabaseGetTag(self.as_ptr()) };
         if tag == 0 {
             None
         } else {
@@ -37,12 +43,12 @@ impl Database {
     /// Set the tag.
     pub fn set_tag(&self, tag: Option<Tag>) {
         let tag = tag.unwrap_or(0);
-        unsafe { libwcdb_sys::WCDBDatabaseSetTag(self.0, tag as i64) };
+        unsafe { libwcdb_sys::WCDBDatabaseSetTag(self.as_ptr(), tag as i64) };
     }
 
     /// The path of the related database.
     pub fn get_path(&self) -> String {
-        let path = unsafe { libwcdb_sys::WCDBDatabaseGetPath(self.0) };
+        let path = unsafe { libwcdb_sys::WCDBDatabaseGetPath(self.as_ptr()) };
         crate::utils::c_ptr_to_string_opt(path).unwrap_or_default()
     }
 
@@ -51,12 +57,12 @@ impl Database {
     /// So you can call this to check whether the database can be opened.  
     /// Return false if an error occurs during sqlite handle initialization.
     pub fn can_open(&self) -> bool {
-        unsafe { libwcdb_sys::WCDBDatabaseCanOpen(self.0) }
+        unsafe { libwcdb_sys::WCDBDatabaseCanOpen(self.as_ptr()) }
     }
 
     /// Check database is already opened.
     pub fn is_opened(&self) -> bool {
-        unsafe { libwcdb_sys::WCDBDatabaseIsOpened(self.0) }
+        unsafe { libwcdb_sys::WCDBDatabaseIsOpened(self.as_ptr()) }
     }
 
     /// Close the database.  
@@ -104,7 +110,7 @@ impl Database {
         }
         unsafe {
             libwcdb_sys::WCDBDatabaseClose(
-                self.0,
+                self.as_ptr(),
                 Box::into_raw(Box::new(on_closed)) as _,
                 Some(on_closed_callback::<F>),
             );
@@ -113,22 +119,22 @@ impl Database {
 
     /// Close the database.
     pub fn close(&self) {
-        unsafe { libwcdb_sys::WCDBDatabaseClose(self.0, ptr::null_mut(), None) };
+        unsafe { libwcdb_sys::WCDBDatabaseClose(self.as_ptr(), ptr::null_mut(), None) };
     }
 
     /// Blockade the database.
     pub fn blockade(&self) {
-        unsafe { libwcdb_sys::WCDBDatabaseBlockade(self.0) };
+        unsafe { libwcdb_sys::WCDBDatabaseBlockade(self.as_ptr()) };
     }
 
     /// Unblockade the database.
     pub fn unblockade(&self) {
-        unsafe { libwcdb_sys::WCDBDatabaseUnblockade(self.0) };
+        unsafe { libwcdb_sys::WCDBDatabaseUnblockade(self.as_ptr()) };
     }
 
     /// Check whether database is blockaded.
     pub fn is_blockaded(&self) -> bool {
-        unsafe { libwcdb_sys::WCDBDatabaseIsBlockaded(self.0) }
+        unsafe { libwcdb_sys::WCDBDatabaseIsBlockaded(self.as_ptr()) }
     }
 
     /// Purge all unused memory of this database.  
@@ -137,7 +143,7 @@ impl Database {
     /// as the number of concurrent threads supported by the hardware implementation.  
     /// You can call it to save some memory.
     pub fn purge(&self) {
-        unsafe { libwcdb_sys::WCDBDatabasePurge(self.0) };
+        unsafe { libwcdb_sys::WCDBDatabasePurge(self.as_ptr()) };
     }
 
     /// Purge all unused memory of all databases.  
@@ -155,10 +161,10 @@ impl Database {
     /// - Returns: A new `Handle`.
     /// - Throws: `Error`
     pub fn get_handle_with_hint(&self, write_hint: bool) -> Result<Handle> {
-        let handle = unsafe { libwcdb_sys::WCDBDatabaseGetHandle(self.0, write_hint) };
+        let handle = unsafe { libwcdb_sys::WCDBDatabaseGetHandle(self.as_ptr(), write_hint) };
         let handle_valid = unsafe { libwcdb_sys::WCDBHandleCheckValid(handle) };
         if handle_valid {
-            Ok(Handle::owned(handle))
+            Ok(Handle::owned(handle, self.clone()))
         } else {
             Err(self.error())
         }
@@ -170,9 +176,13 @@ impl Database {
     }
 
     pub fn error(&self) -> error::Error {
-        let err = unsafe { libwcdb_sys::WCDBDatabaseGetError(self.0) };
-        let wcdb_error = WCDBError::from(err);
+        let err = unsafe { libwcdb_sys::WCDBDatabaseGetError(self.as_ptr()) };
+        let wcdb_error = Box::new(WCDBError::from(err));
         wcdb_error.into()
+    }
+
+    pub fn as_ptr(&self) -> libwcdb_sys::CPPDatabase {
+        self.0.0
     }
 }
 
@@ -250,7 +260,7 @@ impl Database {
             let cipher_version = config.cipher_version as i32;
             unsafe {
                 libwcdb_sys::WCDBDatabaseConfigCipher(
-                    self.0,
+                    self.as_ptr(),
                     key,
                     key_size as i32,
                     page_size,
@@ -258,7 +268,7 @@ impl Database {
                 )
             };
         } else {
-            unsafe { libwcdb_sys::WCDBDatabaseConfigCipher(self.0, ptr::null(), 0, 0, 0) };
+            unsafe { libwcdb_sys::WCDBDatabaseConfigCipher(self.as_ptr(), ptr::null(), 0, 0, 0) };
         }
     }
 
@@ -298,65 +308,109 @@ impl Database {
         F1: Fn(Handle) -> bool + 'static,
         F2: Fn(Handle) -> bool + 'static,
     {
-        unsafe extern "C" fn callback_left<F1, F2>(
+        let t1 = self.clone();
+        let t2 = self.clone();
+        self.set_config_inner(
+            name,
+            invocation,
+            uninvocation,
+            move || t1.clone(),
+            move || t2.clone(),
+            priority,
+        )
+    }
+    fn set_config_inner<F1, F2, F3, F4>(
+        &self,
+        name: &str,
+        invocation: F1,
+        uninvocation: F2,
+        get_self_invocation: F3,
+        get_self_uninvocation: F4,
+        priority: ConfigPriority,
+    ) -> Result<()>
+    where
+        F1: Fn(Handle) -> bool + 'static,
+        F2: Fn(Handle) -> bool + 'static,
+        F3: Fn() -> Database + 'static,
+        F4: Fn() -> Database + 'static,
+    {
+        struct Context<F1, F2> {
+            call: F1,
+            get_self: F2,
+        }
+
+        type CallContext<F1, F2, F3, F4> = Either<Context<F1, F3>, Context<F2, F4>>;
+
+        unsafe extern "C" fn callback_invocation<F1, F2, F3, F4>(
             context: *mut std::ffi::c_void,
             handle: libwcdb_sys::CPPHandle,
         ) -> bool
         where
-            F1: Fn(Handle) -> bool,
-            F2: Fn(Handle) -> bool,
+            F1: Fn(Handle) -> bool + 'static,
+            F2: Fn(Handle) -> bool + 'static,
+            F3: Fn() -> Database + 'static,
+            F4: Fn() -> Database + 'static,
         {
-            let context = Box::from_raw(context as *mut Either<F1, F2>);
-            let ret = if let Some(left) = context.as_ref().as_ref().left() {
-                let handle = Handle::owned(handle);
-                left(handle)
-            } else {
-                true
-            };
-            Box::into_raw(context); // just forget it
+            let raw_context = Box::from_raw(context as *mut CallContext<F1, F2, F3, F4>);
+            let ret = raw_context.as_ref().as_ref().left().map_or(true, |c| {
+                let handle = Handle::reference(handle, (c.get_self)());
+                (c.call)(handle)
+            });
+            Box::into_raw(raw_context); // just forget it
             ret
         }
 
-        unsafe extern "C" fn callback_right<F1, F2>(
+        unsafe extern "C" fn callback_uninvocation<F1, F2, F3, F4>(
             context: *mut std::ffi::c_void,
             handle: libwcdb_sys::CPPHandle,
         ) -> bool
         where
-            F1: Fn(Handle) -> bool,
-            F2: Fn(Handle) -> bool,
+            F1: Fn(Handle) -> bool + 'static,
+            F2: Fn(Handle) -> bool + 'static,
+            F3: Fn() -> Database + 'static,
+            F4: Fn() -> Database + 'static,
         {
-            let context = Box::from_raw(context as *mut Either<F1, F2>);
-            let ret = if let Some(right) = context.as_ref().as_ref().right() {
-                let handle = Handle::owned(handle);
-                right(handle)
-            } else {
-                true
-            };
-            Box::into_raw(context); // just forget it
+            let raw_context = Box::from_raw(context as *mut CallContext<F1, F2, F3, F4>);
+            let ret = raw_context.as_ref().as_ref().right().map_or(true, |c| {
+                let handle = Handle::reference(handle, (c.get_self)());
+                (c.call)(handle)
+            });
+            Box::into_raw(raw_context); // just forget it
             ret
         }
 
-        unsafe extern "C" fn callback_destructor<F1, F2>(context: *mut std::ffi::c_void)
+        unsafe extern "C" fn callback_destructor<F1, F2, F3, F4>(context: *mut std::ffi::c_void)
         where
-            F1: FnOnce(Handle) -> bool,
-            F2: FnOnce(Handle) -> bool,
+            F1: Fn(Handle) -> bool + 'static,
+            F2: Fn(Handle) -> bool + 'static,
+            F3: Fn() -> Database + 'static,
+            F4: Fn() -> Database + 'static,
         {
-            let _ = Box::from_raw(context as *mut Either<F1, F2>);
+            let _ = Box::from_raw(context as *mut CallContext<F1, F2, F3, F4>);
         }
 
         let name = CString::new(name)?;
-        let invocation = Box::into_raw(Box::new(Either::<F1, F2>::Left(invocation)));
-        let uninvocation = Box::into_raw(Box::new(Either::<F1, F2>::Right(uninvocation)));
+        let invocation: *mut CallContext<F1, F2, F3, F4> =
+            Box::into_raw(Box::new(CallContext::Left(Context {
+                call: invocation,
+                get_self: get_self_invocation,
+            })));
+
+        let uninvocation: *mut CallContext<F1, F2, F3, F4> =
+            Box::into_raw(Box::new(CallContext::Right(Context {
+                call: uninvocation,
+                get_self: get_self_uninvocation,
+            })));
         unsafe {
             libwcdb_sys::WCDBDatabaseConfig(
-                self.0,
+                self.as_ptr(),
                 name.as_ptr(),
-                Some(callback_left::<F1, F2>),
+                Some(callback_invocation::<F1, F2, F3, F4>),
                 invocation as _,
-                Some(callback_right::<F1, F2>),
+                Some(callback_uninvocation::<F1, F2, F3, F4>),
                 uninvocation as _,
                 priority as i32,
-                Some(callback_destructor::<F1, F2>), // hard to destruct both invocation and uninvocation, let it leak
+                Some(callback_destructor::<F1, F2, F3, F4>),
             );
         }
         Ok(())

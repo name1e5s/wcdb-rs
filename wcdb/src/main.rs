@@ -14,7 +14,6 @@ fn main() {
             true
         },
         |_| {
-            panic!();
             println!("New handle closed");
             true
         },
@@ -22,5 +21,8 @@ fn main() {
     )
     .unwrap();
     let handle = db.get_handle().unwrap();
-    panic!()
+    drop(handle);
+    db.close_with_callback(|| {
+        println!("Database closed");
+    });
 }
