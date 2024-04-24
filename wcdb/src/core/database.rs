@@ -182,7 +182,7 @@ impl Database {
     }
 
     pub fn as_ptr(&self) -> libwcdb_sys::CPPDatabase {
-        self.0.0
+        self.0 .0
     }
 }
 

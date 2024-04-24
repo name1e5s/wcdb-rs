@@ -21,6 +21,9 @@ fn main() {
     )
     .unwrap();
     let handle = db.get_handle().unwrap();
+    handle
+        .exec_sql(c"create table if not exists a(int b)")
+        .unwrap();
     drop(handle);
     db.close_with_callback(|| {
         println!("Database closed");
