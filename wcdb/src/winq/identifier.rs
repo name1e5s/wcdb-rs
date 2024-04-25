@@ -10,6 +10,7 @@ impl<T> Identifier<T>
 where
     T: Into<*mut CPPObject> + Clone + Copy,
 {
+    // This is a compile-time check to ensure that the size of the type `T` is the same as the size of a pointer.
     #[allow(dead_code)]
     const SIZE_OK: () = assert!(size_of::<T>() == size_of::<*mut CPPObject>());
 
@@ -37,5 +38,14 @@ where
         unsafe {
             libwcdb_sys::WCDBReleaseCPPObject(self.as_ptr());
         }
+    }
+}
+
+impl<T> From<T> for Identifier<T>
+where
+    T: Into<*mut CPPObject> + Clone + Copy,
+{
+    fn from(value: T) -> Self {
+        Self::new(value)
     }
 }
