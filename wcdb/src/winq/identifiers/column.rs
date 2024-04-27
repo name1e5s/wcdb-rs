@@ -27,7 +27,7 @@ impl Column {
     }
 
     pub fn r#in(self, name: &CStr) -> Column {
-        unsafe { libwcdb_sys::WCDBColumnInTable(self.as_raw(), name.as_ptr()) }
+        self.with_raw(|t| unsafe { libwcdb_sys::WCDBColumnInTable(t, name.as_ptr()) });
         self
     }
 

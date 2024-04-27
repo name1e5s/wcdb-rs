@@ -29,8 +29,11 @@ where
         desc.to_string_lossy().into_owned()
     }
 
-    pub fn as_raw(&self) -> T {
-        self.0
+    pub fn with_raw<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(T) -> R,
+    {
+        f(self.0)
     }
 }
 
