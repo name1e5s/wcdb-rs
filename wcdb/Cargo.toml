@@ -12,3 +12,7 @@ libwcdb-sys = { path = "../libwcdb-sys" }
 thiserror = "1"
 num_enum = "0.7"
 either = "1"
+
+# todo: rust style doc test
+[lib]
+doctest = false

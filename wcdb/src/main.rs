@@ -1,4 +1,4 @@
-use wcdb::core::database::ConfigPriority;
+use wcdb::{core::database::ConfigPriority, winq::identifiers::bind::BindParameter};
 
 fn main() {
     println!("Cool");
@@ -28,4 +28,6 @@ fn main() {
     db.close_with_callback(|| {
         println!("Database closed");
     });
+    let exp = BindParameter::_1();
+    println!("{:?}", exp.description());
 }

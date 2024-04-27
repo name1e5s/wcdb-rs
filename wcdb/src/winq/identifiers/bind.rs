@@ -24,7 +24,6 @@ macro_rules! f {
         pub fn $name() -> BindParameter {
             BindParameter::new($value)
         }
-    
     };
 }
 
@@ -57,5 +56,61 @@ impl BindParameter {
             .into_iter()
             .map(|i| BindParameter::new(i + 1))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! t {
+        ($p:expr, $sql:literal) => {{
+            let p = $p;
+            assert_eq!(p.description(), $sql);
+        }};
+    }
+
+    #[test]
+    fn test_bind_parameter() {
+        t!(BindParameter::new(1), "?1");
+        t!(
+            BindParameter::named(CStr::from_bytes_with_nul(b"name\0").unwrap()),
+            ":name"
+        );
+        t!(
+            BindParameter::at(CStr::from_bytes_with_nul(b"name\0").unwrap()),
+            "@name"
+        );
+        t!(
+            BindParameter::colon(CStr::from_bytes_with_nul(b"name\0").unwrap()),
+            ":name"
+        );
+        t!(
+            BindParameter::dollar(CStr::from_bytes_with_nul(b"name\0").unwrap()),
+            "$name"
+        );
+
+        t!(BindParameter::def(), "?");
+        t!(BindParameter::_1(), "?1");
+        t!(BindParameter::_2(), "?2");
+        t!(BindParameter::_3(), "?3");
+        t!(BindParameter::_4(), "?4");
+        t!(BindParameter::_5(), "?5");
+        t!(BindParameter::_6(), "?6");
+        t!(BindParameter::_7(), "?7");
+        t!(BindParameter::_8(), "?8");
+        t!(BindParameter::_9(), "?9");
+        t!(BindParameter::_10(), "?10");
+        t!(BindParameter::_11(), "?11");
+        t!(BindParameter::_12(), "?12");
+        t!(BindParameter::_13(), "?13");
+        t!(BindParameter::_14(), "?14");
+        t!(BindParameter::_15(), "?15");
+
+        let params = BindParameter::bind_parameters(3);
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[0].description(), "?1");
+        assert_eq!(params[1].description(), "?2");
+        assert_eq!(params[2].description(), "?3");
     }
 }
