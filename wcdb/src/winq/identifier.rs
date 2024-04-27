@@ -28,6 +28,10 @@ where
         let desc = unsafe { CStr::from_ptr(desc) };
         desc.to_string_lossy().into_owned()
     }
+
+    pub fn as_raw(&self) -> T {
+        self.0
+    }
 }
 
 impl<T> Drop for Identifier<T>

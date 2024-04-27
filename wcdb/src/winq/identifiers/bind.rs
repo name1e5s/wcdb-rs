@@ -73,22 +73,10 @@ mod tests {
     #[test]
     fn test_bind_parameter() {
         t!(BindParameter::new(1), "?1");
-        t!(
-            BindParameter::named(CStr::from_bytes_with_nul(b"name\0").unwrap()),
-            ":name"
-        );
-        t!(
-            BindParameter::at(CStr::from_bytes_with_nul(b"name\0").unwrap()),
-            "@name"
-        );
-        t!(
-            BindParameter::colon(CStr::from_bytes_with_nul(b"name\0").unwrap()),
-            ":name"
-        );
-        t!(
-            BindParameter::dollar(CStr::from_bytes_with_nul(b"name\0").unwrap()),
-            "$name"
-        );
+        t!(BindParameter::named(c"name"), ":name");
+        t!(BindParameter::at(c"name"), "@name");
+        t!(BindParameter::colon(c"name"), ":name");
+        t!(BindParameter::dollar(c"name"), "$name");
 
         t!(BindParameter::def(), "?");
         t!(BindParameter::_1(), "?1");

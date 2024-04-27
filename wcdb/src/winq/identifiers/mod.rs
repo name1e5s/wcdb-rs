@@ -1,4 +1,5 @@
 pub mod bind;
+pub mod column;
 
 macro_rules! identifier {
     ($name:ident<$inner:ident>) => {
@@ -11,6 +12,10 @@ macro_rules! identifier {
 
             pub fn description(&self) -> String {
                 self.0.description()
+            }
+
+            pub fn as_raw(&self) -> $inner {
+                self.0.as_raw()
             }
         }
     };
