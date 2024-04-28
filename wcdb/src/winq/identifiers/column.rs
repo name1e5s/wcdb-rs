@@ -61,5 +61,6 @@ mod tests {
         eq_sql!(Column::rowid(), "rowid");
         eq_sql!(Column::new(c"name").r#in(c"table"), "table.name");
         eq_sql!(Column::new(c"name").r#as(c"alias"), "name AS alias");
+        eq_sql!(Column::new(c"name").r#in(c"t").r#as(c"alias"), "t.name AS alias");
     }
 }
