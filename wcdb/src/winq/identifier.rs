@@ -2,6 +2,12 @@ use std::{ffi::CStr, mem::size_of};
 
 use libwcdb_sys::CPPObject;
 
+pub trait WithRawIdentifier<T> {
+    fn with_raw<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(T) -> R;
+}
+
 pub struct Identifier<T>(T)
 where
     T: Into<*mut CPPObject> + Clone + Copy;
@@ -28,12 +34,42 @@ where
         let desc = unsafe { CStr::from_ptr(desc) };
         desc.to_string_lossy().into_owned()
     }
+}
 
-    pub fn with_raw<F, R>(&self, f: F) -> R
+impl<T> WithRawIdentifier<T> for Identifier<T>
+where
+    T: Into<*mut CPPObject> + Clone + Copy,
+{
+    fn with_raw<F, R>(&self, f: F) -> R
     where
         F: FnOnce(T) -> R,
     {
         f(self.0)
+    }
+}
+
+impl<T, R> WithRawIdentifier<R> for &T
+where
+    T: WithRawIdentifier<R>,
+{
+    fn with_raw<F, R1>(&self, f: F) -> R1
+    where
+        F: FnOnce(R) -> R1,
+    {
+        T::with_raw(self, f)
+    }
+}
+
+impl<T1, T2, R1, R2> WithRawIdentifier<(R1, R2)> for (T1, T2)
+where
+    T1: WithRawIdentifier<R1>,
+    T2: WithRawIdentifier<R2>,
+{
+    fn with_raw<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce((R1, R2)) -> R,
+    {
+        self.0.with_raw(|r1| self.1.with_raw(|r2| f((r1, r2))))
     }
 }
 

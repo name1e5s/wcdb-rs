@@ -33,7 +33,14 @@ macro_rules! identifier {
                 self.0.description()
             }
 
-            pub fn with_raw<F, R>(&self, f: F) -> R
+            #[allow(dead_code)]
+            pub(crate) fn from_raw(value: $inner) -> Self {
+                Self(value.into())
+            }
+        }
+
+        impl crate::winq::identifier::WithRawIdentifier<$inner> for $name {
+            fn with_raw<F, R>(&self, f: F) -> R
             where
                 F: FnOnce($inner) -> R,
             {

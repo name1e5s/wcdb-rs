@@ -2,7 +2,8 @@ use std::{ffi::CStr, os::raw::c_void, ptr};
 
 use libwcdb_sys::CPPColumn;
 
-use super::identifier;
+use super::{identifier, result_column::ResultColumn, schema::Schema};
+use crate::winq::{convert::AsSchema, identifier::WithRawIdentifier};
 
 identifier!(Column<CPPColumn>);
 
@@ -31,8 +32,20 @@ impl Column {
         self
     }
 
-    // todo: as result column
-    // todo: column of schema
+    pub fn r#as(&self, alias: &CStr) -> ResultColumn {
+        let ptr =
+            self.with_raw(|r| unsafe { libwcdb_sys::WCDBColumnConfigAlias(r, alias.as_ptr()) });
+        ResultColumn::from_raw(ptr)
+    }
+
+    pub fn of<T: AsSchema>(self, schema: T) -> Column {
+        self.of_inner(schema.as_schema())
+    }
+
+    fn of_inner(self, schema: Schema) -> Column {
+        (&self, &schema).with_raw(|(t, s)| unsafe { libwcdb_sys::WCDBColumnOfSchema(t, s) });
+        self
+    }
 }
 
 #[cfg(test)]
@@ -53,5 +66,6 @@ mod tests {
         t!(Column::all(), "*");
         t!(Column::rowid(), "rowid");
         t!(Column::new(c"name").r#in(c"table"), "table.name");
+        t!(Column::new(c"name").r#as(c"alias"), "name AS alias");
     }
 }
