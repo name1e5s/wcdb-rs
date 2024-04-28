@@ -51,3 +51,17 @@ macro_rules! identifier {
 }
 
 use identifier;
+
+#[cfg(test)]
+mod tests {
+    macro_rules! eq_sql {
+        ($p:expr, $sql:literal) => {{
+            let p = $p;
+            assert_eq!(p.description(), $sql);
+        }};
+    }
+    pub(crate) use eq_sql;
+}
+
+#[cfg(test)]
+use tests::eq_sql;

@@ -50,22 +50,16 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
+    use super::super::eq_sql;
     use super::*;
-
-    macro_rules! t {
-        ($p:expr, $sql:literal) => {{
-            let p = $p;
-            assert_eq!(p.description(), $sql);
-        }};
-    }
 
     #[test]
     fn test_column() {
-        t!(Column::new(c"name"), "name");
-        t!(Column::new_with_table_binding(c"name", ptr::null()), "name");
-        t!(Column::all(), "*");
-        t!(Column::rowid(), "rowid");
-        t!(Column::new(c"name").r#in(c"table"), "table.name");
-        t!(Column::new(c"name").r#as(c"alias"), "name AS alias");
+        eq_sql!(Column::new(c"name"), "name");
+        eq_sql!(Column::new_with_table_binding(c"name", ptr::null()), "name");
+        eq_sql!(Column::all(), "*");
+        eq_sql!(Column::rowid(), "rowid");
+        eq_sql!(Column::new(c"name").r#in(c"table"), "table.name");
+        eq_sql!(Column::new(c"name").r#as(c"alias"), "name AS alias");
     }
 }
