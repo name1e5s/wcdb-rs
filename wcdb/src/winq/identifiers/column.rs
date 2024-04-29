@@ -3,7 +3,10 @@ use std::{ffi::CStr, os::raw::c_void, ptr};
 use libwcdb_sys::CPPColumn;
 
 use super::{identifier, result_column::ResultColumn, schema::Schema};
-use crate::winq::{convert::AsSchema, identifier::WithRawIdentifier};
+use crate::winq::{
+    convert::{AsColumn, AsSchema},
+    identifier::WithRawIdentifier,
+};
 
 identifier!(Column<CPPColumn>);
 
@@ -45,6 +48,20 @@ impl Column {
     fn of_inner(self, schema: Schema) -> Column {
         (&self, &schema).with_raw(|(t, s)| unsafe { libwcdb_sys::WCDBColumnOfSchema(t, s) });
         self
+    }
+}
+
+impl AsColumn for Column {
+    fn as_column(self) -> Column {
+        self
+    }
+
+    fn r#in(self, name: &CStr) -> Column {
+        self.r#in(name)
+    }
+
+    fn of<T: AsSchema>(self, schema: T) -> Column {
+        self.of(schema)
     }
 }
 
